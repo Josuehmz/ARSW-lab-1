@@ -62,9 +62,77 @@ public class HostBlackListsValidator {
         return blackListOcurrences;
     }
     
+    /**
+     * Check the given host's IP address in all the available black lists using N threads,
+     * and report it as NOT Trustworthy when such IP was reported in at least
+     * BLACK_LIST_ALARM_COUNT lists, or as Trustworthy in any other case.
+     * @param ipaddress suspicious host's IP address.
+     * @param N number of threads to use for parallel search.
+     * @return Blacklists numbers where the given host's IP address was found.
+     */
+    public List<Integer> checkHost(String ipaddress, int N){
+        
+        LinkedList<Integer> blackListOccurrences = new LinkedList<>();
+        
+        HostBlacklistsDataSourceFacade skds = HostBlacklistsDataSourceFacade.getInstance();
+        
+        int totalServers = skds.getRegisteredServersCount();
+        int serversPerThread = totalServers / N;
+        
+        
+        BlackListThread[] threads = new BlackListThread[N];
+        
+        
+        for (int i = 0; i < N; i++) {
+            int startIndex = i * serversPerThread;
+            int endIndex;
+            
+           
+            if (i == N - 1) {
+                endIndex = totalServers - 1;
+            } else {
+                endIndex = (i + 1) * serversPerThread - 1;
+            }
+            
+            threads[i] = new BlackListThread(ipaddress, startIndex, endIndex, skds);
+            threads[i].start();
+        }
+        
+       
+        try {
+            for (int i = 0; i < N; i++) {
+                threads[i].join();
+            }
+        } catch (InterruptedException e) {
+            LOG.log(Level.SEVERE, "Thread was interrupted", e);
+        }
+        
+        
+        int totalOccurrences = 0;
+        int totalCheckedLists = 0;
+        
+        for (int i = 0; i < N; i++) {
+            totalOccurrences += threads[i].getOccurrencesCount();
+            totalCheckedLists += threads[i].getCheckedListsCount();
+            blackListOccurrences.addAll(threads[i].getBlackListOccurrences());
+        }
+        
+        
+        if (totalOccurrences >= BLACK_LIST_ALARM_COUNT) {
+            skds.reportAsNotTrustworthy(ipaddress);
+        } else {
+            skds.reportAsTrustworthy(ipaddress);
+        }
+        
+        
+        LOG.log(Level.INFO, "Checked Black Lists:{0} of {1}", new Object[]{totalCheckedLists, totalServers});
+        
+        return blackListOccurrences;
+    }
+    
     
     private static final Logger LOG = Logger.getLogger(HostBlackListsValidator.class.getName());
     
     
-    
+
 }
